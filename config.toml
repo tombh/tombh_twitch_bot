@@ -1,0 +1,11 @@
+[[command]]
+trigger = "hello"
+response = "Hello {user} 🧉!"
+
+[[command]]
+trigger = "burstball"
+response = "Laugh at Tom falling when his gym ball burst: https://clips.twitch.tv/TriangularAgreeableYogurtSmoocherZ-4Po_zRXgTbfuKF1y 🤣"
+
+[[command]]
+trigger = "lurk"
+response = "Lurk long and prosper {user} 🖖"
