@@ -1,8 +1,10 @@
+pub mod commands;
 pub mod websocket;
 
 use std::sync::Arc;
 
 use clap::Parser;
+use color_eyre::Result;
 use eyre::{ContextCompat as _, WrapErr as _};
 use std::io::Write as _;
 use tokio::sync::Mutex;
@@ -11,7 +13,10 @@ use twitch_api::{
     eventsub::{self, Event, Message, Payload},
     HelixClient,
 };
-use twitch_oauth2::{Scope, TwitchToken as _, UserToken};
+use twitch_oauth2::{Scope, TwitchToken as _};
+
+const BROADCASTER_ID: &str = "630634223";
+const BOT_ID: &str = "630634223";
 
 #[derive(Parser, Debug, Clone)]
 #[clap(about, version)]
@@ -181,11 +186,9 @@ impl Bot {
         event: Event,
         timestamp: twitch_api::types::Timestamp,
     ) -> Result<(), eyre::Report> {
-        let token = self.token.lock().await;
         match event {
             Event::ChannelChatMessageV1(Payload {
                 message: Message::Notification(payload),
-                subscription,
                 ..
             }) => {
                 println!(
@@ -197,8 +200,7 @@ impl Bot {
                     let command = split_whitespace.next().unwrap();
                     let rest = split_whitespace.next();
 
-                    self.command(&payload, &subscription, command, rest, &token)
-                        .await?;
+                    self.command(&payload, command, rest).await?;
                 }
             }
             Event::ChannelChatNotificationV1(Payload {
@@ -226,28 +228,30 @@ impl Bot {
     async fn command(
         &self,
         payload: &eventsub::channel::ChannelChatMessageV1Payload,
-        subscription: &eventsub::EventSubscriptionInformation<
-            eventsub::channel::ChannelChatMessageV1,
-        >,
         command: &str,
         _rest: Option<&str>,
-        token: &UserToken,
     ) -> Result<(), eyre::Report> {
         tracing::info!("Command: {}", command);
-        if let Some(response) = self.config.command.iter().find(|c| c.trigger == command) {
-            self.client
-                .send_chat_message_reply(
-                    &subscription.condition.broadcaster_user_id,
-                    &subscription.condition.user_id,
-                    &payload.message_id,
-                    response
-                        .response
-                        .replace("{user}", payload.chatter_user_name.as_str())
-                        .as_str(),
-                    token,
-                )
-                .await?;
+        let username = payload.chatter_user_name.as_str();
+
+        match command {
+            "arrived" => self.arrived(username)?,
+            _ => self.text_responder(command, payload).await?,
         }
+
+        Ok(())
+    }
+
+    async fn send_message_reply(
+        &self,
+        parent_message_id: &twitch_api::types::MsgId,
+        message: &str,
+    ) -> Result<()> {
+        let token = self.token.lock().await.clone();
+        self.client
+            .send_chat_message_reply(BROADCASTER_ID, BOT_ID, parent_message_id, message, &token)
+            .await?;
+
         Ok(())
     }
 }
