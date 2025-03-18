@@ -128,7 +128,9 @@ impl ChatWebsocketClient {
                     _ => Ok(()),
                 }
             }
-            tungstenite::Message::Close(_) => todo!(),
+            tungstenite::Message::Close(_) => {
+                eyre::bail!("Websocket connection closed")
+            }
             _ => Ok(()),
         }
     }

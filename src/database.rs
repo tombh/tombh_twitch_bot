@@ -11,32 +11,30 @@ pub struct Mate {
     pub last_played: chrono::DateTime<chrono::Utc>,
 }
 
+#[derive(Debug, sqlx::Type)]
+pub enum AchievementKind {
+    ChickenRun,
+}
+
+#[derive(Debug, sqlx::FromRow)]
+pub struct Achievement {
+    pub achiever: i32,
+    pub kind: AchievementKind,
+    pub data: serde_json::Value,
+    pub timestamp: chrono::DateTime<chrono::Utc>,
+}
+
 pub struct Database {
     connection: sqlx::SqlitePool,
 }
 
 impl Database {
     pub async fn new() -> Result<Self> {
-        let mut db = Self {
+        let db = Self {
             connection: sqlx::SqlitePool::connect(format!("sqlite://{}", DB_PATH).as_str()).await?,
         };
-        db.setup().await?;
-        Ok(db)
-    }
 
-    async fn setup(&mut self) -> Result<()> {
-        self.connection
-            .execute(
-                "
-                CREATE TABLE IF NOT EXISTS mate (
-                    id          INTEGER  PRIMARY KEY AUTOINCREMENT,
-                    name        TEXT     UNIQUE  NOT NULL,
-                    last_played DATETIME
-                )
-                ",
-            )
-            .await?;
-        Ok(())
+        Ok(db)
     }
 
     pub async fn get_mate(&self, username: &str) -> Result<Mate> {
@@ -71,6 +69,24 @@ impl Database {
                 )
                 .bind(chrono::offset::Utc::now())
                 .bind(username),
+            )
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn add_achievement(&self, achievement: Achievement) -> Result<()> {
+        self.connection
+            .execute(
+                sqlx::query(
+                    "
+                    INSERT INTO achievement(achiever, achievement, data)
+                    VALUES (?, ?, ?);
+                    ",
+                )
+                .bind(achievement.achiever)
+                .bind(achievement.kind)
+                .bind(achievement.data),
             )
             .await?;
 
