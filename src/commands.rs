@@ -1,12 +1,21 @@
 use color_eyre::Result;
 
 impl crate::Bot {
-    pub fn arrived(&self, username: &str) -> Result<()> {
+    pub async fn arrived(&self, username: &str) -> Result<()> {
+        let mate = self.db.get_mate(username).await?;
+        let elapsed = chrono::Utc::now() - mate.last_played;
+        if elapsed.num_hours() < 12 {
+            tracing::info!("Not playing {username}'s sound. {elapsed} to go.");
+            return Ok(());
+        }
+
         let path = format!("/home/streamer/Documents/{username}-arrived.mp3");
         std::process::Command::new("mpv")
             .arg("--volume=50")
             .arg(path)
             .spawn()?;
+
+        self.db.set_last_played(username).await?;
         Ok(())
     }
 

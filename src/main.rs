@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod database;
 pub mod websocket;
 
 use std::sync::Arc;
@@ -124,6 +125,7 @@ async fn initialise() -> Result<(), eyre::Report> {
     let token = Arc::new(Mutex::new(token));
 
     let bot = Bot {
+        db: database::Database::new().await?,
         opts,
         client,
         token,
@@ -135,6 +137,7 @@ async fn initialise() -> Result<(), eyre::Report> {
 }
 
 pub struct Bot {
+    pub db: database::Database,
     pub opts: Cli,
     pub client: HelixClient<'static, reqwest::Client>,
     pub token: Arc<Mutex<twitch_oauth2::UserToken>>,
@@ -235,7 +238,7 @@ impl Bot {
         let username = payload.chatter_user_name.as_str();
 
         match command {
-            "arrived" => self.arrived(username)?,
+            "arrived" => self.arrived(username).await?,
             _ => self.text_responder(command, payload).await?,
         }
 
