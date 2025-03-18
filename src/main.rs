@@ -238,7 +238,7 @@ impl Bot {
         let username = payload.chatter_user_name.as_str();
 
         match command {
-            "arrived" => self.arrived(username).await?,
+            "arrived" => self.arrived(payload, username).await?,
             _ => self.text_responder(command, payload).await?,
         }
 

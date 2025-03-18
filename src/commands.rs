@@ -1,11 +1,18 @@
 use color_eyre::Result;
 
 impl crate::Bot {
-    pub async fn arrived(&self, username: &str) -> Result<()> {
+    pub async fn arrived(
+        &self,
+        payload: &crate::eventsub::channel::ChannelChatMessageV1Payload,
+        username: &str,
+    ) -> Result<()> {
         let mate = self.db.get_mate(username).await?;
         let elapsed = chrono::Utc::now() - mate.last_played;
         if elapsed.num_hours() < 12 {
             tracing::info!("Not playing {username}'s sound. {elapsed} to go.");
+            let message = format!("You're already here {username}!");
+            self.send_message_reply(&payload.message_id, message.as_str())
+                .await?;
             return Ok(());
         }
 
@@ -14,6 +21,10 @@ impl crate::Bot {
             .arg("--volume=50")
             .arg(path)
             .spawn()?;
+
+        let message = format!("{username} has arrived 📣");
+        self.send_message_reply(&payload.message_id, message.as_str())
+            .await?;
 
         self.db.set_last_played(username).await?;
         Ok(())
