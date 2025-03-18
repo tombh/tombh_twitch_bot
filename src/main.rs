@@ -239,6 +239,7 @@ impl Bot {
 
         match command {
             "arrived" => self.arrived(payload, username).await?,
+            "chirp" => self.chirp(payload, username, None).await?,
             _ => self.text_responder(command, payload).await?,
         }
 
