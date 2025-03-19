@@ -179,7 +179,8 @@ impl Bot {
             #[allow(unreachable_code)]
             Ok(())
         };
-        let ws = websocket.run(|e, ts| async { self.handle_event(e, ts).await });
+        let ws =
+            websocket.run(|event, timestamp| async { self.handle_event(event, timestamp).await });
         futures::future::try_join(ws, refresh_token).await?;
         Ok(())
     }
@@ -190,6 +191,8 @@ impl Bot {
         timestamp: twitch_api::types::Timestamp,
     ) -> Result<(), eyre::Report> {
         match event {
+            // The `channel.chat.message` subscription type sends a notification when
+            // any user sends a message to a channel’s chat room.
             Event::ChannelChatMessageV1(Payload {
                 message: Message::Notification(payload),
                 ..
@@ -201,11 +204,16 @@ impl Bot {
                 if let Some(command) = payload.message.text.strip_prefix("!") {
                     let mut split_whitespace = command.split_whitespace();
                     let command = split_whitespace.next().unwrap();
-                    let rest = split_whitespace.next();
+                    let arguments = split_whitespace.next();
 
-                    self.command(&payload, command, rest).await?;
+                    self.command(&payload, command, arguments).await?;
+                } else {
+                    self.db.save_message(&payload, timestamp).await?;
                 }
             }
+            // The `channel.chat.notification` subscription type sends a notification
+            // when an event that appears in chat occurs, such as someone subscribing
+            // to the channel or a subscription is gifted.
             Event::ChannelChatNotificationV1(Payload {
                 message: Message::Notification(payload),
                 ..
@@ -223,9 +231,89 @@ impl Bot {
                     payload.message.text
                 );
             }
-            _ => {}
+            Event::AutomodMessageHoldV1(payload) => Self::log_event(&payload),
+            Event::AutomodMessageHoldV2(payload) => Self::log_event(&payload),
+            Event::AutomodMessageUpdateV1(payload) => Self::log_event(&payload),
+            Event::AutomodMessageUpdateV2(payload) => Self::log_event(&payload),
+            Event::AutomodSettingsUpdateV1(payload) => Self::log_event(&payload),
+            Event::AutomodTermsUpdateV1(payload) => Self::log_event(&payload),
+            Event::ChannelAdBreakBeginV1(payload) => Self::log_event(&payload),
+            Event::ChannelChatClearV1(payload) => Self::log_event(&payload),
+            Event::ChannelChatClearUserMessagesV1(payload) => Self::log_event(&payload),
+            Event::ChannelChatMessageDeleteV1(payload) => Self::log_event(&payload),
+            Event::ChannelChatUserMessageHoldV1(payload) => Self::log_event(&payload),
+            Event::ChannelChatUserMessageUpdateV1(payload) => Self::log_event(&payload),
+            Event::ChannelChatSettingsUpdateV1(payload) => Self::log_event(&payload),
+            Event::ChannelCharityCampaignDonateV1(payload) => Self::log_event(&payload),
+            Event::ChannelCharityCampaignProgressV1(payload) => Self::log_event(&payload),
+            Event::ChannelCharityCampaignStartV1(payload) => Self::log_event(&payload),
+            Event::ChannelCharityCampaignStopV1(payload) => Self::log_event(&payload),
+            Event::ChannelUpdateV2(payload) => Self::log_event(&payload),
+            Event::ChannelFollowV2(payload) => Self::log_event(&payload),
+            Event::ChannelSubscribeV1(payload) => Self::log_event(&payload),
+            Event::ChannelCheerV1(payload) => Self::log_event(&payload),
+            Event::ChannelBanV1(payload) => Self::log_event(&payload),
+            Event::ChannelUnbanV1(payload) => Self::log_event(&payload),
+            Event::ChannelUnbanRequestCreateV1(payload) => Self::log_event(&payload),
+            Event::ChannelUnbanRequestResolveV1(payload) => Self::log_event(&payload),
+            Event::ChannelVipAddV1(payload) => Self::log_event(&payload),
+            Event::ChannelVipRemoveV1(payload) => Self::log_event(&payload),
+            Event::ChannelWarningAcknowledgeV1(payload) => Self::log_event(&payload),
+            Event::ChannelWarningSendV1(payload) => Self::log_event(&payload),
+            Event::ChannelPointsAutomaticRewardRedemptionAddV1(payload) => {
+                Self::log_event(&payload)
+            }
+            Event::ChannelPointsCustomRewardAddV1(payload) => Self::log_event(&payload),
+            Event::ChannelPointsCustomRewardUpdateV1(payload) => Self::log_event(&payload),
+            Event::ChannelPointsCustomRewardRemoveV1(payload) => Self::log_event(&payload),
+            Event::ChannelPointsCustomRewardRedemptionAddV1(payload) => Self::log_event(&payload),
+            Event::ChannelPointsCustomRewardRedemptionUpdateV1(payload) => {
+                Self::log_event(&payload)
+            }
+            Event::ChannelPollBeginV1(payload) => Self::log_event(&payload),
+            Event::ChannelPollProgressV1(payload) => Self::log_event(&payload),
+            Event::ChannelPollEndV1(payload) => Self::log_event(&payload),
+            Event::ChannelPredictionBeginV1(payload) => Self::log_event(&payload),
+            Event::ChannelPredictionProgressV1(payload) => Self::log_event(&payload),
+            Event::ChannelPredictionLockV1(payload) => Self::log_event(&payload),
+            Event::ChannelPredictionEndV1(payload) => Self::log_event(&payload),
+            Event::ChannelRaidV1(payload) => Self::log_event(&payload),
+            Event::ChannelSharedChatBeginV1(payload) => Self::log_event(&payload),
+            Event::ChannelSharedChatEndV1(payload) => Self::log_event(&payload),
+            Event::ChannelSharedChatUpdateV1(payload) => Self::log_event(&payload),
+            Event::ChannelShieldModeBeginV1(payload) => Self::log_event(&payload),
+            Event::ChannelShieldModeEndV1(payload) => Self::log_event(&payload),
+            Event::ChannelShoutoutCreateV1(payload) => Self::log_event(&payload),
+            Event::ChannelShoutoutReceiveV1(payload) => Self::log_event(&payload),
+            Event::ChannelSuspiciousUserMessageV1(payload) => Self::log_event(&payload),
+            Event::ChannelSuspiciousUserUpdateV1(payload) => Self::log_event(&payload),
+            Event::ChannelGoalBeginV1(payload) => Self::log_event(&payload),
+            Event::ChannelGoalProgressV1(payload) => Self::log_event(&payload),
+            Event::ChannelGoalEndV1(payload) => Self::log_event(&payload),
+            Event::ChannelHypeTrainBeginV1(payload) => Self::log_event(&payload),
+            Event::ChannelHypeTrainProgressV1(payload) => Self::log_event(&payload),
+            Event::ChannelHypeTrainEndV1(payload) => Self::log_event(&payload),
+            Event::ChannelModerateV1(payload) => Self::log_event(&payload),
+            Event::ChannelModerateV2(payload) => Self::log_event(&payload),
+            Event::ChannelModeratorAddV1(payload) => Self::log_event(&payload),
+            Event::ChannelModeratorRemoveV1(payload) => Self::log_event(&payload),
+            Event::ConduitShardDisabledV1(payload) => Self::log_event(&payload),
+            Event::StreamOnlineV1(payload) => Self::log_event(&payload),
+            Event::StreamOfflineV1(payload) => Self::log_event(&payload),
+            Event::UserUpdateV1(payload) => Self::log_event(&payload),
+            Event::UserAuthorizationGrantV1(payload) => Self::log_event(&payload),
+            Event::UserAuthorizationRevokeV1(payload) => Self::log_event(&payload),
+            Event::UserWhisperMessageV1(payload) => Self::log_event(&payload),
+            Event::ChannelSubscriptionEndV1(payload) => Self::log_event(&payload),
+            Event::ChannelSubscriptionGiftV1(payload) => Self::log_event(&payload),
+            Event::ChannelSubscriptionMessageV1(payload) => Self::log_event(&payload),
+            _ => tracing::warn!("Uknown Twitch event"),
         }
         Ok(())
+    }
+
+    fn log_event<T: eventsub::EventSubscription>(event: &Payload<T>) {
+        tracing::info!("{}", event.get_event_type());
     }
 
     async fn command(

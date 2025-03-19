@@ -17,6 +17,14 @@ pub enum AchievementKind {
 }
 
 #[derive(Debug, sqlx::FromRow)]
+pub struct Message {
+    pub user_id: i64,
+    pub user_name: String,
+    pub text: String,
+    pub kind: twitch_api::eventsub::channel::chat::message::MessageType,
+}
+
+#[derive(Debug, sqlx::FromRow)]
 pub struct Achievement {
     pub achiever: i32,
     pub kind: AchievementKind,
@@ -90,6 +98,29 @@ impl Database {
             )
             .await?;
 
+        Ok(())
+    }
+
+    pub async fn save_message(
+        &self,
+        payload: &crate::eventsub::channel::ChannelChatMessageV1Payload,
+        timestamp: twitch_api::types::Timestamp,
+    ) -> Result<()> {
+        self.connection
+            .execute(
+                sqlx::query(
+                    "
+                    INSERT INTO message(twitch_user_id, timestamp, username, text, kind)
+                    VALUES (?, ?, ?, ?, ?);
+                    ",
+                )
+                .bind(payload.chatter_user_id.as_str())
+                .bind(timestamp.as_str())
+                .bind(payload.chatter_user_name.as_str())
+                .bind(payload.message.text.clone())
+                .bind(serde_json::to_string(&payload.message_type)?),
+            )
+            .await?;
         Ok(())
     }
 }

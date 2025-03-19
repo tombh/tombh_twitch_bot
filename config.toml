@@ -13,3 +13,7 @@ response = "Lurk long and prosper {user} 🖖"
 [[command]]
 trigger = "sounds"
 response = "Find out more about the sound system and add your own sounds at: https://github.com/tombh/tombh_twitch_bot/blob/main/docs/SOUNDS.md"
+
+[[command]]
+trigger = "matrix"
+response = "Our Matrix chat room: https://tinyurl.com/5n6zsmu5"
