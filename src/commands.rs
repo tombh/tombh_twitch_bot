@@ -38,6 +38,13 @@ impl crate::Bot {
         }
 
         let path = format!("/home/streamer/Documents/arrivals/{username}-arrived.mp3");
+        if !std::path::Path::new(&path).exists() {
+            let message = "You don't have an arrival sound yet, type \"!sounds\" to find out how.";
+            self.send_message_reply(&payload.message_id, message)
+                .await?;
+            return Ok(());
+        }
+
         std::process::Command::new("mpv")
             .arg("--volume=50")
             .arg(path)
