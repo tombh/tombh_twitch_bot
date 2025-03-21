@@ -25,8 +25,6 @@ pub struct Cli {
     /// Client ID of twitch application
     #[clap(long, env, hide_env = true)]
     pub client_id: Option<twitch_oauth2::ClientId>,
-    #[clap(long, env, hide_env = true)]
-    pub broadcaster_login: twitch_api::types::UserName,
     /// Path to config file
     #[clap(long, default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/config.toml"))]
     pub config: std::path::PathBuf,
@@ -61,11 +59,11 @@ async fn initialise() -> Result<(), eyre::Report> {
         .with_writer(std::io::stderr)
         .init();
     _ = dotenvy::dotenv();
-    let opts = Cli::parse();
-    let config = Config::load(&opts.config)?;
+    let cli_args = Cli::parse();
+    let config = Config::load(&cli_args.config)?;
 
     let client: HelixClient<reqwest::Client> = twitch_api::HelixClient::with_client(
-        ClientDefault::default_client_with_name(Some("my_chatbot".parse()?))?,
+        ClientDefault::default_client_with_name(Some("tombh_chatbot".parse()?))?,
     );
 
     let user = std::env::var("USER").expect("No value in `$USER` ENV var");
@@ -73,13 +71,19 @@ async fn initialise() -> Result<(), eyre::Report> {
     let access_token_path = state_directory.join("access.token");
     let refresh_token_path = state_directory.join("refresh.token");
 
-    let token = if access_token_path.exists() {
+    let token = if cli_args.client_id.is_none() {
         let mut access_token_string = std::fs::read_to_string(access_token_path)?;
-        access_token_string.retain(|c| !c.is_whitespace());
+        access_token_string = access_token_string.trim().to_string();
         let access_token = twitch_oauth2::AccessToken::from(access_token_string);
-        twitch_oauth2::UserToken::from_existing(&client, access_token, None, None).await?
+
+        let mut refresh_token_string = std::fs::read_to_string(refresh_token_path)?;
+        refresh_token_string = refresh_token_string.trim().to_string();
+        let refresh_token = twitch_oauth2::RefreshToken::from(refresh_token_string);
+
+        twitch_oauth2::UserToken::from_existing(&client, access_token, Some(refresh_token), None)
+            .await?
     } else {
-        let client_id = opts
+        let client_id = cli_args
             .client_id
             .clone()
             .expect("No existing tokens found, please provide client ID");
@@ -113,20 +117,15 @@ async fn initialise() -> Result<(), eyre::Report> {
 
     let Some(twitch_api::helix::users::User {
         id: broadcaster, ..
-    }) = client
-        .get_user_from_login(&opts.broadcaster_login, &token)
-        .await?
+    }) = client.get_user_from_id(BROADCASTER_ID, &token).await?
     else {
-        eyre::bail!(
-            "No broadcaster found with login: {}",
-            opts.broadcaster_login
-        );
+        eyre::bail!("No broadcaster found with ID: {}", BROADCASTER_ID);
     };
     let token = Arc::new(Mutex::new(token));
 
     let bot = Bot {
         db: database::Database::new().await?,
-        opts,
+        opts: cli_args,
         client,
         token,
         config,
@@ -156,7 +155,7 @@ impl Bot {
             connect_url: twitch_api::TWITCH_EVENTSUB_WEBSOCKET_URL.clone(),
             chats: vec![self.broadcaster.clone()],
         };
-        let refresh_token = async move {
+        let token_refresher = async move {
             let token = self.token.clone();
             let client = self.client.clone();
             // We check constantly if the token is valid.
@@ -179,9 +178,14 @@ impl Bot {
             #[allow(unreachable_code)]
             Ok(())
         };
-        let ws =
-            websocket.run(|event, timestamp| async { self.handle_event(event, timestamp).await });
-        futures::future::try_join(ws, refresh_token).await?;
+        let eventer = websocket.run(|event, timestamp| async {
+            let result = self.handle_event(event, timestamp).await;
+            if let Err(error) = result {
+                tracing::error!("Handling event: {error:?}");
+            }
+            Ok(())
+        });
+        futures::future::try_join(eventer, token_refresher).await?;
         Ok(())
     }
 
