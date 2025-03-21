@@ -3,6 +3,10 @@ trigger = "hello"
 response = "Hello {user} 🧉!"
 
 [[command]]
+trigger = "commands"
+response = "All our commands can be found here: https://github.com/tombh/tombh_twitch_bot/blob/main/docs/commands.md"
+
+[[command]]
 trigger = "burstball"
 response = "Laugh at Tom falling when his gym ball burst: https://clips.twitch.tv/TriangularAgreeableYogurtSmoocherZ-4Po_zRXgTbfuKF1y 🤣"
 
