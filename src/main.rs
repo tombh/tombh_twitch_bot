@@ -205,14 +205,15 @@ impl Bot {
                     "[{}] {}: {}",
                     timestamp, payload.chatter_user_name, payload.message.text
                 );
+
+                self.db.save_message(&payload, timestamp).await?;
+
                 if let Some(command) = payload.message.text.strip_prefix("!") {
                     let mut split_whitespace = command.split_whitespace();
                     let command = split_whitespace.next().unwrap();
                     let arguments = split_whitespace.next();
 
                     self.command(&payload, command, arguments).await?;
-                } else {
-                    self.db.save_message(&payload, timestamp).await?;
                 }
             }
             // The `channel.chat.notification` subscription type sends a notification
