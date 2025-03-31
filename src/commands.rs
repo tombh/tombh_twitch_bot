@@ -125,4 +125,16 @@ impl crate::Bot {
         }
         Ok(())
     }
+
+    pub async fn osd(
+        &self,
+        payload: &crate::eventsub::channel::ChannelChatMessageV1Payload,
+        arguments: Option<&str>,
+    ) -> Result<()> {
+        if let Some(text) = arguments {
+            let message = format!(" {} says: {text}", payload.chatter_user_name);
+            Self::onscreen_popup(message)?;
+        };
+        Ok(())
+    }
 }

@@ -163,17 +163,26 @@ impl ChatWebsocketClient {
                 .try_flatten()
                 .try_collect()
                 .await?;
+
             if !subs.is_empty() {
                 continue;
             }
-            let message =
-                eventsub::channel::chat::ChannelChatMessageV1::new(id.clone(), user_id.clone());
-            self.client
-                .create_eventsub_subscription(message, transport.clone(), &*token)
-                .await?;
+
+            if self.connect_url.to_string().contains("127.0.0.1") {
+                continue;
+            }
+
             self.client
                 .create_eventsub_subscription(
-                    eventsub::channel::chat::ChannelChatNotificationV1::new(id.clone(), user_id),
+                    eventsub::channel::chat::ChannelChatMessageV1::new(id.clone(), user_id.clone()),
+                    transport.clone(),
+                    &*token,
+                )
+                .await?;
+
+            self.client
+                .create_eventsub_subscription(
+                    eventsub::channel::ChannelFollowV2::new(id.clone(), user_id.clone()),
                     transport.clone(),
                     &*token,
                 )

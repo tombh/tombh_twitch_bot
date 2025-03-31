@@ -15,6 +15,10 @@ trigger = "lurk"
 response = "Lurk long and prosper {user} 🖖"
 
 [[command]]
+trigger = "unlurk"
+response = "{user} jumped out of the bushes!"
+
+[[command]]
 trigger = "sounds"
 response = "Find out more about the sound system and add your own sounds at: https://github.com/tombh/tombh_twitch_bot/blob/main/docs/SOUNDS.md"
 

@@ -9,6 +9,7 @@ use color_eyre::Result;
 use eyre::{ContextCompat as _, WrapErr as _};
 use std::io::Write as _;
 use tokio::sync::Mutex;
+use tracing_subscriber::{layer::SubscriberExt as _, util::SubscriberInitExt as _};
 use twitch_api::{
     client::ClientDefault,
     eventsub::{self, Event, Message, Payload},
@@ -18,16 +19,20 @@ use twitch_oauth2::{Scope, TwitchToken as _};
 
 const BROADCASTER_ID: &str = "630634223";
 const BOT_ID: &str = "630634223";
+const TWITCH_CLI_ENV_PATH: &str = "/home/streamer/.config/tbhbot/.env";
 
 #[derive(Parser, Debug, Clone)]
 #[clap(about, version)]
 pub struct Cli {
     /// Client ID of twitch application
-    #[clap(long, env, hide_env = true)]
-    pub client_id: Option<twitch_oauth2::ClientId>,
+    #[clap(long, action)]
+    pub get_new_token: bool,
     /// Path to config file
     #[clap(long, default_value = concat!(env!("CARGO_MANIFEST_DIR"), "/config.toml"))]
     pub config: std::path::PathBuf,
+    /// Mock websocket server for testing
+    #[clap(long)]
+    pub ws_server: Option<url::Url>,
 }
 
 #[derive(serde_derive::Serialize, serde_derive::Deserialize, Debug)]
@@ -50,15 +55,27 @@ impl Config {
 
 #[tokio::main]
 async fn main() -> Result<(), eyre::Report> {
-    initialise().await
+    let mut is_restart = false;
+    color_eyre::install()?;
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::EnvFilter::from_default_env())
+        .init();
+    dotenvy::from_path(TWITCH_CLI_ENV_PATH).expect("Couldn't load .env file");
+    for _ in 0..100 {
+        let result = initialise(is_restart).await;
+        if let Err(error) = result {
+            tracing::error!("App crashed: {error:?}");
+        }
+        is_restart = true;
+        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+        tracing::info!("Restarting bot");
+    }
+
+    Ok(())
 }
 
-async fn initialise() -> Result<(), eyre::Report> {
-    color_eyre::install()?;
-    tracing_subscriber::fmt::fmt()
-        .with_writer(std::io::stderr)
-        .init();
-    _ = dotenvy::dotenv();
+async fn initialise(is_restart: bool) -> Result<(), eyre::Report> {
     let cli_args = Cli::parse();
     let config = Config::load(&cli_args.config)?;
 
@@ -71,7 +88,11 @@ async fn initialise() -> Result<(), eyre::Report> {
     let access_token_path = state_directory.join("access.token");
     let refresh_token_path = state_directory.join("refresh.token");
 
-    let token = if cli_args.client_id.is_none() {
+    let client_secret_string =
+        std::env::var("CLIENTSECRET").expect("Couldn't find CLIENTSECRET in the environment");
+    let client_secret = twitch_oauth2::ClientSecret::new(client_secret_string);
+
+    let token = if !cli_args.get_new_token || is_restart {
         let mut access_token_string = std::fs::read_to_string(access_token_path)?;
         access_token_string = access_token_string.trim().to_string();
         let access_token = twitch_oauth2::AccessToken::from(access_token_string);
@@ -80,20 +101,28 @@ async fn initialise() -> Result<(), eyre::Report> {
         refresh_token_string = refresh_token_string.trim().to_string();
         let refresh_token = twitch_oauth2::RefreshToken::from(refresh_token_string);
 
-        twitch_oauth2::UserToken::from_existing(&client, access_token, Some(refresh_token), None)
-            .await?
+        twitch_oauth2::UserToken::from_existing(
+            &client,
+            access_token,
+            Some(refresh_token),
+            Some(client_secret),
+        )
+        .await?
     } else {
-        let client_id = cli_args
-            .client_id
-            .clone()
-            .expect("No existing tokens found, please provide client ID");
+        let client_id_string =
+            std::env::var("CLIENTID").expect("Couldn't find CLIENTID in the environment");
         let mut builder = twitch_oauth2::tokens::DeviceUserTokenBuilder::new(
-            client_id,
-            vec![Scope::UserReadChat, Scope::UserWriteChat],
+            client_id_string,
+            [
+                Scope::UserReadChat,
+                Scope::UserWriteChat,
+                Scope::ModeratorReadFollowers,
+            ]
+            .to_vec(),
         );
         let code = builder.start(&client).await?;
         println!("Please go to: {}", code.verification_uri);
-        let token = builder.wait_for_code(&client, tokio::time::sleep).await?;
+        let mut token = builder.wait_for_code(&client, tokio::time::sleep).await?;
 
         let mut access_token_file = std::fs::OpenOptions::new()
             .write(true)
@@ -112,6 +141,9 @@ async fn initialise() -> Result<(), eyre::Report> {
             .truncate(true)
             .open(refresh_token_path)?;
         writeln!(refresh_token_file, "{}", refresh_token.secret())?;
+
+        token.set_secret(Some(client_secret));
+
         token
     };
 
@@ -146,18 +178,25 @@ pub struct Bot {
 
 impl Bot {
     pub async fn start(&self) -> Result<(), eyre::Report> {
+        let connect_url = match self.opts.ws_server.clone() {
+            Some(uri) => uri,
+            None => twitch_api::TWITCH_EVENTSUB_WEBSOCKET_URL.clone(),
+        };
+
         // To make a connection to the chat we need to use a websocket connection.
         // This is a wrapper for the websocket connection that handles the reconnects and handles all messages from eventsub.
         let websocket = websocket::ChatWebsocketClient {
             session_id: None,
             token: self.token.clone(),
             client: self.client.clone(),
-            connect_url: twitch_api::TWITCH_EVENTSUB_WEBSOCKET_URL.clone(),
+            connect_url,
             chats: vec![self.broadcaster.clone()],
         };
         let token_refresher = async move {
             let token = self.token.clone();
-            let client = self.client.clone();
+            let client: HelixClient<reqwest::Client> = twitch_api::HelixClient::with_client(
+                ClientDefault::default_client_with_name(Some("tombh_chatbot".parse()?))?,
+            );
             // We check constantly if the token is valid.
             // We also need to refresh the token if it's about to be expired.
             let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(30));
@@ -185,6 +224,7 @@ impl Bot {
             }
             Ok(())
         });
+
         futures::future::try_join(eventer, token_refresher).await?;
         Ok(())
     }
@@ -208,10 +248,13 @@ impl Bot {
 
                 self.db.save_message(&payload, timestamp).await?;
 
-                if let Some(command) = payload.message.text.strip_prefix("!") {
-                    let mut split_whitespace = command.split_whitespace();
+                if let Some(original) = payload.message.text.strip_prefix("!") {
+                    let mut split_whitespace = original.split_whitespace();
+
                     let command = split_whitespace.next().unwrap();
-                    let arguments = split_whitespace.next();
+
+                    let maybe_more = original.split_once(char::is_whitespace);
+                    let arguments = maybe_more.map(|more| more.1);
 
                     self.command(&payload, command, arguments).await?;
                 }
@@ -236,6 +279,11 @@ impl Bot {
                     payload.message.text
                 );
             }
+            Event::ChannelFollowV2(Payload {
+                message: Message::Notification(payload),
+                ..
+            }) => self.new_follower(&payload)?,
+
             Event::AutomodMessageHoldV1(payload) => Self::log_event(&payload),
             Event::AutomodMessageHoldV2(payload) => Self::log_event(&payload),
             Event::AutomodMessageUpdateV1(payload) => Self::log_event(&payload),
@@ -254,7 +302,6 @@ impl Bot {
             Event::ChannelCharityCampaignStartV1(payload) => Self::log_event(&payload),
             Event::ChannelCharityCampaignStopV1(payload) => Self::log_event(&payload),
             Event::ChannelUpdateV2(payload) => Self::log_event(&payload),
-            Event::ChannelFollowV2(payload) => Self::log_event(&payload),
             Event::ChannelSubscribeV1(payload) => Self::log_event(&payload),
             Event::ChannelCheerV1(payload) => Self::log_event(&payload),
             Event::ChannelBanV1(payload) => Self::log_event(&payload),
@@ -325,7 +372,7 @@ impl Bot {
         &self,
         payload: &eventsub::channel::ChannelChatMessageV1Payload,
         command: &str,
-        _rest: Option<&str>,
+        rest: Option<&str>,
     ) -> Result<(), eyre::Report> {
         tracing::info!("Command: {}", command);
         let username = payload.chatter_user_name.as_str();
@@ -333,6 +380,7 @@ impl Bot {
         match command {
             "arrived" => self.arrived(payload, username).await?,
             "chirp" => self.chirp(payload, username, None).await?,
+            "osd" => self.osd(payload, rest).await?,
             _ => self.text_responder(command, payload).await?,
         }
 
@@ -349,6 +397,27 @@ impl Bot {
             .send_chat_message_reply(BROADCASTER_ID, BOT_ID, parent_message_id, message, &token)
             .await?;
 
+        Ok(())
+    }
+
+    fn onscreen_popup(message: String) -> Result<()> {
+        std::process::Command::new("notify-send")
+            .arg("--category=twitch")
+            .arg(message)
+            .spawn()?;
+        Ok(())
+    }
+
+    fn new_follower(&self, payload: &eventsub::channel::ChannelFollowV2Payload) -> Result<()> {
+        tracing::info!("New follower: {payload:?}");
+        let message = format!(" \nWelcome {} ❤️", payload.user_name);
+        Self::onscreen_popup(message)?;
+
+        let path = "/home/streamer/Documents/great_scott.mp3";
+        std::process::Command::new("mpv")
+            .arg("--volume=50")
+            .arg(path)
+            .spawn()?;
         Ok(())
     }
 }
