@@ -17,7 +17,7 @@ use twitch_api::{
 };
 use twitch_oauth2::{Scope, TwitchToken as _};
 
-const BROADCASTER_ID: &str = "630634223";
+pub const BROADCASTER_ID: &str = "630634223";
 const BOT_ID: &str = "630634223";
 const TWITCH_CLI_ENV_PATH: &str = "/home/streamer/.config/tbhbot/.env";
 
@@ -283,6 +283,10 @@ impl Bot {
                 message: Message::Notification(payload),
                 ..
             }) => self.new_follower(&payload)?,
+            Event::ChannelRaidV1(Payload {
+                message: Message::Notification(payload),
+                ..
+            }) => self.incoming_raid(&payload)?,
 
             Event::AutomodMessageHoldV1(payload) => Self::log_event(&payload),
             Event::AutomodMessageHoldV2(payload) => Self::log_event(&payload),
@@ -329,7 +333,6 @@ impl Bot {
             Event::ChannelPredictionProgressV1(payload) => Self::log_event(&payload),
             Event::ChannelPredictionLockV1(payload) => Self::log_event(&payload),
             Event::ChannelPredictionEndV1(payload) => Self::log_event(&payload),
-            Event::ChannelRaidV1(payload) => Self::log_event(&payload),
             Event::ChannelSharedChatBeginV1(payload) => Self::log_event(&payload),
             Event::ChannelSharedChatEndV1(payload) => Self::log_event(&payload),
             Event::ChannelSharedChatUpdateV1(payload) => Self::log_event(&payload),
@@ -400,9 +403,9 @@ impl Bot {
         Ok(())
     }
 
-    fn onscreen_popup(message: String) -> Result<()> {
+    fn onscreen_popup(message: String, category: &str) -> Result<()> {
         std::process::Command::new("notify-send")
-            .arg("--category=twitch")
+            .arg(format!("--category={}", category))
             .arg(message)
             .spawn()?;
         Ok(())
@@ -411,9 +414,25 @@ impl Bot {
     fn new_follower(&self, payload: &eventsub::channel::ChannelFollowV2Payload) -> Result<()> {
         tracing::info!("New follower: {payload:?}");
         let message = format!(" \nWelcome {} ❤️", payload.user_name);
-        Self::onscreen_popup(message)?;
+        Self::onscreen_popup(message, "twitch-new-follower")?;
 
         let path = "/home/streamer/Documents/great_scott.mp3";
+        std::process::Command::new("mpv")
+            .arg("--volume=50")
+            .arg(path)
+            .spawn()?;
+        Ok(())
+    }
+
+    fn incoming_raid(&self, payload: &eventsub::channel::ChannelRaidV1Payload) -> Result<()> {
+        tracing::info!("Raid: {payload:?}");
+        let message = format!(
+            " \n{} RAIDERS FROM {}!",
+            payload.viewers, payload.to_broadcaster_user_name
+        );
+        Self::onscreen_popup(message, "twitch-raid")?;
+
+        let path = "/home/streamer/Documents/hand_of_god.mp3";
         std::process::Command::new("mpv")
             .arg("--volume=50")
             .arg(path)

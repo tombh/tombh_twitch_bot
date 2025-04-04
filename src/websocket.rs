@@ -143,7 +143,7 @@ impl ChatWebsocketClient {
         }
         let token = self.token.lock().await;
         let transport = eventsub::Transport::websocket(data.id.clone());
-        for id in &self.chats {
+        for _ in &self.chats {
             let user_id = token.user_id().unwrap().to_owned();
             let subs: Vec<_> = self
                 .client
@@ -174,7 +174,10 @@ impl ChatWebsocketClient {
 
             self.client
                 .create_eventsub_subscription(
-                    eventsub::channel::chat::ChannelChatMessageV1::new(id.clone(), user_id.clone()),
+                    eventsub::channel::chat::ChannelChatMessageV1::new(
+                        crate::BROADCASTER_ID,
+                        user_id.clone(),
+                    ),
                     transport.clone(),
                     &*token,
                 )
@@ -182,7 +185,15 @@ impl ChatWebsocketClient {
 
             self.client
                 .create_eventsub_subscription(
-                    eventsub::channel::ChannelFollowV2::new(id.clone(), user_id.clone()),
+                    eventsub::channel::ChannelFollowV2::new(crate::BROADCASTER_ID, user_id.clone()),
+                    transport.clone(),
+                    &*token,
+                )
+                .await?;
+
+            self.client
+                .create_eventsub_subscription(
+                    eventsub::channel::ChannelRaidV1::to_broadcaster_user_id(crate::BROADCASTER_ID),
                     transport.clone(),
                     &*token,
                 )

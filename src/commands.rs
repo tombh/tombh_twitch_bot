@@ -133,7 +133,7 @@ impl crate::Bot {
     ) -> Result<()> {
         if let Some(text) = arguments {
             let message = format!(" {} says: {text}", payload.chatter_user_name);
-            Self::onscreen_popup(message)?;
+            Self::onscreen_popup(message, "twitch-osd")?;
         };
         Ok(())
     }
