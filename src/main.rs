@@ -428,7 +428,7 @@ impl Bot {
         tracing::info!("Raid: {payload:?}");
         let message = format!(
             " \n{} RAIDERS FROM {}!",
-            payload.viewers, payload.to_broadcaster_user_name
+            payload.viewers, payload.from_broadcaster_user_name
         );
         Self::onscreen_popup(message, "twitch-raid")?;
 
