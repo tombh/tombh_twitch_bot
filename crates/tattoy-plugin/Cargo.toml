@@ -1,0 +1,18 @@
+[package]
+name = "tattoy_twitch_tombh_plugin"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+color-eyre = "0.6.3"
+image = "0.25.6"
+reqwest = "0.12.15"
+serde = "1.0.219"
+serde_json = "1.0.140"
+tattoy-protocol = { path = "../../../tattoy/crates/tattoy-protocol"}
+tokio = { version = "1.44.2", features = ["full", "tracing"] }
+tracing = { version = "0.1.41" }
+tracing-subscriber = "0.3.19"
+
+[lints]
+workspace = true

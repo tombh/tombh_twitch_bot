@@ -2,3 +2,5 @@
 .cargo
 *.db
 .env
+
+crates/tattoy-plugin/global_emotes.json

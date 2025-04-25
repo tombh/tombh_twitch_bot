@@ -1,14 +1,20 @@
 use color_eyre::Result;
 use eyre::ContextCompat as _;
 use rand::{seq::IteratorRandom as _, Rng as _};
+use tokio::io::AsyncWriteExt;
 
-impl crate::Bot {
+impl crate::bot::Bot {
     pub async fn text_responder(
         &self,
         command: &str,
         message: &crate::eventsub::channel::ChannelChatMessageV1Payload,
     ) -> Result<()> {
-        if let Some(response) = self.config.command.iter().find(|c| c.trigger == command) {
+        if let Some(response) = self
+            .config
+            .command
+            .iter()
+            .find(|c| c.trigger.contains(&command.to_string()))
+        {
             self.send_message_reply(
                 &message.message_id,
                 response
@@ -132,8 +138,46 @@ impl crate::Bot {
         arguments: Option<&str>,
     ) -> Result<()> {
         if let Some(text) = arguments {
-            let message = format!(" {} says: {text}", payload.chatter_user_name);
+            let safe_text = text
+                .chars()
+                .filter(|c| c.is_alphanumeric() || [' ', '?'].contains(c))
+                .collect::<String>();
+            let message = format!(" {} says: {safe_text}", payload.chatter_user_name);
             Self::onscreen_popup(message, "twitch-osd")?;
+        };
+        Ok(())
+    }
+
+    pub async fn tattoy(
+        &self,
+        payload: &crate::eventsub::channel::ChannelChatMessageV1Payload,
+        arguments: Option<&str>,
+    ) -> Result<()> {
+        tracing::info!("Tattoy command: {arguments:?}");
+        if let Some(text) = arguments {
+            let mut parts: Vec<&str> = text.split_whitespace().collect();
+            let Some(emote) = parts.pop() else {
+                return Ok(());
+            };
+            let regexish = text.replace(emote, "").trim().to_owned();
+            let safe_regexish = regexish
+                .chars()
+                .filter(|c| c.is_alphanumeric() || [' ', '?'].contains(c))
+                .collect::<String>();
+            let message = tattoy_twitch_tombh_plugin::BotMessage {
+                username: payload.chatter_user_name.clone().into(),
+                regexish: safe_regexish,
+                emote: emote.into(),
+            };
+            let mut json = serde_json::to_string(&message)?;
+            json.push('\n');
+            tracing::info!("Sending message to Tattoy: {json}");
+            self.tattoy_socket
+                .lock()
+                .await
+                .write_all(json.as_ref())
+                .await?;
+            tracing::info!("Message sent");
         };
         Ok(())
     }
